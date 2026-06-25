@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Більярд</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+    <!-- Підключаємо Three.js для 3D графіки прямо з інтернету -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<script>
+    // 1. Сцена, Камера, Рендерер
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1a);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 10, 15);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // 2. Освітлення
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, 20, 10);
+    scene.add(dirLight);
+
+    // 3. Більярдний стіл (зелена площина)
+    const tableGeometry = new THREE.BoxGeometry(16, 0.5, 8);
+    const tableMaterial = new THREE.MeshStandardMaterial({ color: 0x006622, roughness: 0.6 });
+    const table = new THREE.Mesh(tableGeometry, tableMaterial);
+    table.position.y = -0.25;
+    scene.add(table);
+
+    // 4. Біла куля (Cue Ball)
+    const ballGeometry = new THREE.SphereGeometry(0.3, 32, 32);
+    const ballMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1 });
+    const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+    ball.position.set(-4, 0.3, 0); // Ставимо на стіл
+    scene.add(ball);
+
+    // Швидкість кулі (для майбутнього руху)
+    let ballVelocity = { x: 0.05, z: 0.02 };
+
+    // 5. Анімація (Ігровий цикл)
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // Простий рух кулі
+        ball.position.x += ballVelocity.x;
+        ball.position.z += ballVelocity.z;
+
+        // Відбивання від бортиків столу
+        if (ball.position.x > 7.7 || ball.position.x < -7.7) ballVelocity.x *= -1;
+        if (ball.position.z > 3.7 || ball.position.z < -3.7) ballVelocity.z *= -1;
+
+        renderer.render(scene, camera);
+    }
+
+    // Запуск анімації
+    animate();
+
+    // Адаптація під розмір екрану мобільного при повороті
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
