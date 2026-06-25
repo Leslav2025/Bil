@@ -10,13 +10,14 @@
         #ui {
             position: absolute; top: 10px; left: 10px; color: white;
             background: rgba(0,0,0,0.75); padding: 12px 16px; border-radius: 8px;
-            font-size: 16px; pointer-events: none; line-height: 1.5;
+            font-size: 15px; pointer-events: none; line-height: 1.4;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         #game-over {
             display: none; position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%); color: white; background: rgba(0,0,0,0.9);
             padding: 30px; border-radius: 10px; text-align: center; font-size: 24px;
+            z-index: 10;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -24,15 +25,15 @@
 <body>
 
 <div id="ui">
-    <b>Очки:</b> <span id="score" style="color: #ff3333;">0</span><br>
-    <b>Залишилось ударів:</b> <span id="clicks" style="color: #00ff55;">15</span><br>
-    <small style="opacity: 0.8;">Чорна: +7 | Червона: +3 | Інші: +1<br>Біла в лузі: -2 очки</small>
+    <b>Очки:</b> <span id="score" style="color: #ff3333;">0</span> | 
+    <b>Ударів:</b> <span id="clicks" style="color: #00ff55;">15</span><br>
+    <small style="opacity: 0.8;">Чорна: +7 | Червона: +3 | Інші: +1 (Біла: -2)</small>
 </div>
 
 <div id="game-over">
     <h2>ГРУ ЗАКІНЧЕНО!</h2>
     <p>Ваш результат: <span id="final-score">0</span> очок</p>
-    <p style="font-size: 16px; color: #aaa;">Торкніться екрана, щоб грати знову</p>
+    <p style="font-size: 16px; color: #aaa;">Торкніться екрана для перезапуску</p>
 </div>
 
 <script>
@@ -40,12 +41,12 @@
     let clicksLeft = 15;
     let gameOver = false;
 
-    // 1. Сцена, Камера, Рендерер
+    // 1. Сцена, Камера, Рендерер (налаштовано під вертикальний екран)
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 11, 9);
+    camera.position.set(0, 15, 1); // Камера дивиться згори по центру
     camera.lookAt(0, -1, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -54,17 +55,17 @@
     document.body.appendChild(renderer.domElement);
 
     // 2. Світло
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
     dirLight.position.set(5, 20, 5);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 3. Стіл
+    // 3. Вертикальний стіл (координати X та Z помінялися місцями)
     const tableGroup = new THREE.Group();
-    const clothGeo = new THREE.BoxGeometry(14, 0.4, 7);
+    const clothGeo = new THREE.BoxGeometry(7, 0.4, 14); // Ширина 7, Довжина 14
     const clothMat = new THREE.MeshStandardMaterial({ color: 0x0a6c36, roughness: 0.7 });
     const cloth = new THREE.Mesh(clothGeo, clothMat);
     cloth.position.y = -0.2;
@@ -72,21 +73,24 @@
     tableGroup.add(cloth);
 
     const borderMat = new THREE.MeshStandardMaterial({ color: 0x5a2a00, roughness: 0.5 });
-    const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(14.6, 0.6, 0.3), borderMat);
-    bLong1.position.set(0, 0.1, 3.65);
-    const bLong2 = bLong1.clone(); bLong2.position.z = -3.65;
+    // Короткі бортики (вгорі та внизу)
+    const bShort1 = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.6, 0.3), borderMat);
+    bShort1.position.set(0, 0.1, 7.15);
+    const bShort2 = bShort1.clone(); bShort2.position.z = -7.15;
     
-    const bShort1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 7.6), borderMat);
-    bShort1.position.set(7.15, 0.1, 0);
-    const bShort2 = bShort1.clone(); bShort2.position.x = -7.15;
+    // Довгі бортики (зліва та справа)
+    const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 14.6), borderMat);
+    bLong1.position.set(3.65, 0.1, 0);
+    const bLong2 = bLong1.clone(); bLong2.position.x = -3.65;
 
-    tableGroup.add(bLong1, bLong2, bShort1, bShort2);
+    tableGroup.add(bShort1, bShort2, bLong1, bLong2);
     scene.add(tableGroup);
 
-    // 4. Лузи
+    // 4. Вертикальні лузи
     const pockets = [
-        { x: -6.8, z: -3.3 }, { x: 0, z: -3.45 }, { x: 6.8, z: -3.3 },
-        { x: -6.8, z: 3.3 },  { x: 0, z: 3.45 },  { x: 6.8, z: 3.3 }
+        { x: -3.3, z: -6.8 }, { x: 3.3, z: -6.8 }, // Верхні кутові
+        { x: -3.45, z: 0 },   { x: 3.45, z: 0 },   // Середні
+        { x: -3.3, z: 6.8 },  { x: 3.3, z: 6.8 }   // Нижні кутові
     ];
     const pocketRadius = 0.42;
     const pocketGeo = new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.1, 24);
@@ -121,29 +125,28 @@
     }
 
     function initGameObjects() {
-        // Очищення старих куль якщо є
         balls.forEach(b => scene.remove(b.mesh));
         balls = [];
 
-        // Біла куля
-        createBall(-4, 0, 0xffffff, -2, true);
+        // Біла куля (тепер внизу столу для зручного удару вгору)
+        createBall(0, 4, 0xffffff, -2, true);
 
-        // Створення піраміди куль з різною цінністю
-        const startX = 1.5;
-        // Набір кольорів та їхня вартість: чорна (+7), червона (+3), жовта/синя (+1)
+        // Піраміда кольорових куль (тепер вгорі столу)
+        const startZ = -1.5;
         const ballSetup = [
-            { c: 0xffd700, p: 1 },  // Рядок 1
-            { c: 0x0000ff, p: 1 }, { c: 0xff0000, p: 3 }, // Рядок 2
-            { c: 0xff0000, p: 3 }, { c: 0x111111, p: 7 }, { c: 0xff0000, p: 3 }, // Рядок 3 (Чорна по центру)
-            { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, // Рядок 4
-            { c: 0xff0000, p: 3 }, { c: 0xff0000, p: 3 }, { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, { c: 0xff0000, p: 3 } // Рядок 5
+            { c: 0xffd700, p: 1 },
+            { c: 0x0000ff, p: 1 }, { c: 0xff0000, p: 3 },
+            { c: 0xff0000, p: 3 }, { c: 0x111111, p: 7 }, { c: 0xff0000, p: 3 },
+            { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 },
+            { c: 0xff0000, p: 3 }, { c: 0xff0000, p: 3 }, { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, { c: 0xff0000, p: 3 }
         ];
 
         let idx = 0;
         for (let i = 0; i < 5; i++) {
             for (let j = 0; j <= i; j++) {
-                const bx = startX + i * (ballRadius * 1.8);
-                const bz = (j - i / 2) * (ballRadius * 2.15);
+                // Розвертаємо побудову піраміди по вертикалі
+                const bx = (j - i / 2) * (ballRadius * 2.15);
+                const bz = startZ - i * (ballRadius * 1.8);
                 const setup = ballSetup[idx] || { c: 0xffffff, p: 1 };
                 createBall(bx, bz, setup.c, setup.p);
                 idx++;
@@ -162,7 +165,7 @@
 
     // Лінія прицілювання
     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xff3333, linewidth: 2 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xff3333 });
     const aimLine = new THREE.Line(lineGeo, lineMat);
     aimLine.visible = false;
     scene.add(aimLine);
@@ -192,6 +195,7 @@
         const dx = e.touches[0].clientX - touchStart.x;
         const dy = e.touches[0].clientY - touchStart.y;
         
+        // Коригуємо напрямок відтягування під нову орієнтацію
         aimVector.x = -dx * 0.04;
         aimVector.z = -dy * 0.04;
 
@@ -214,8 +218,7 @@
 
         const whiteBall = balls.find(b => b.isCue);
         if (whiteBall) {
-            // Рахуємо удар лише якщо лінія прицілювання мала силу
-            if (Math.abs(aimVector.x) > 0.1 || Math.abs(aimVector.z) > 0.1) {
+            if (Math.abs(aimVector.x) > 0.05 || Math.abs(aimVector.z) > 0.05) {
                 whiteBall.vel.x = aimVector.x * 0.26;
                 whiteBall.vel.z = aimVector.z * 0.26;
                 clicksLeft--;
@@ -237,16 +240,15 @@
                 
                 if (b.mesh.position.y < -0.8) {
                     if (b.isCue) {
-                        // Штраф за білу кулю
-                        score += b.points; // Додає мінус 2
+                        score += b.points;
                         document.getElementById('score').innerText = score;
                         
-                        b.mesh.position.set(-4, ballRadius, 0);
+                        // Повертаємо білу кулю на її нове початкове місце (вниз столу)
+                        b.mesh.position.set(0, ballRadius, 4);
                         b.mesh.scale.set(1, 1, 1);
                         b.vel.x = 0; b.vel.z = 0;
                         b.isFalling = false;
                     } else {
-                        // Плюс за кольорову кулю
                         score += b.points;
                         document.getElementById('score').innerText = score;
                         scene.remove(b.mesh);
@@ -274,9 +276,9 @@
                 }
             });
 
-            // Бортики
-            const limitX = 7.0 - b.radius;
-            const limitZ = 3.5 - b.radius;
+            // Нові межі бортиків для вертикального столу
+            const limitX = 3.5 - b.radius;
+            const limitZ = 7.0 - b.radius;
 
             if (b.mesh.position.x > limitX) { b.mesh.position.x = limitX; b.vel.x *= -1; }
             if (b.mesh.position.x < -limitX) { b.mesh.position.x = -limitX; b.vel.x *= -1; }
@@ -284,7 +286,7 @@
             if (b.mesh.position.z < -limitZ) { b.mesh.position.z = -limitZ; b.vel.z *= -1; }
         }
 
-        // Перевірка кінця гри (коли всі кулі зупинилися і ходи закінчились)
+        // Перевірка фінішу
         if (clicksLeft <= 0 && !gameOver) {
             let allStopped = balls.every(b => b.vel.x === 0 && b.vel.z === 0);
             if (allStopped) {
@@ -294,7 +296,7 @@
             }
         }
 
-        // Зіткнення куль
+        // Зіткнення
         for (let i = 0; i < balls.length; i++) {
             for (let j = i + 1; j < balls.length; j++) {
                 const b1 = balls[i]; const b2 = balls[j];
