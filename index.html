@@ -3,29 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Більярд</title>
+    <title>3D Більярд Про</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; touch-action: none; font-family: sans-serif; }
         canvas { display: block; }
         #ui {
             position: absolute; top: 10px; left: 10px; color: white;
-            background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 5px;
-            font-size: 14px; pointer-events: none;
+            background: rgba(0,0,0,0.75); padding: 12px 16px; border-radius: 8px;
+            font-size: 16px; pointer-events: none; line-height: 1.5;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        #game-over {
+            display: none; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); color: white; background: rgba(0,0,0,0.9);
+            padding: 30px; border-radius: 10px; text-align: center; font-size: 24px;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-<div id="ui">Проведіть пальцем, щоб націлитись. Відпустіть для удару!</div>
+<div id="ui">
+    <b>Очки:</b> <span id="score" style="color: #ff3333;">0</span><br>
+    <b>Залишилось ударів:</b> <span id="clicks" style="color: #00ff55;">15</span><br>
+    <small style="opacity: 0.8;">Чорна: +7 | Червона: +3 | Інші: +1<br>Біла в лузі: -2 очки</small>
+</div>
+
+<div id="game-over">
+    <h2>ГРУ ЗАКІНЧЕНО!</h2>
+    <p>Ваш результат: <span id="final-score">0</span> очок</p>
+    <p style="font-size: 16px; color: #aaa;">Торкніться екрана, щоб грати знову</p>
+</div>
 
 <script>
+    let score = 0;
+    let clicksLeft = 15;
+    let gameOver = false;
+
     // 1. Сцена, Камера, Рендерер
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x151515);
+    scene.background = new THREE.Color(0x121212);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 12, 10);
+    camera.position.set(0, 11, 9);
     camera.lookAt(0, -1, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -42,10 +62,8 @@
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 3. Стіл (ігрове поле та бортики)
+    // 3. Стіл
     const tableGroup = new THREE.Group();
-    
-    // Зелене сукно
     const clothGeo = new THREE.BoxGeometry(14, 0.4, 7);
     const clothMat = new THREE.MeshStandardMaterial({ color: 0x0a6c36, roughness: 0.7 });
     const cloth = new THREE.Mesh(clothGeo, clothMat);
@@ -53,7 +71,6 @@
     cloth.receiveShadow = true;
     tableGroup.add(cloth);
 
-    // Дерев'яні бортики
     const borderMat = new THREE.MeshStandardMaterial({ color: 0x5a2a00, roughness: 0.5 });
     const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(14.6, 0.6, 0.3), borderMat);
     bLong1.position.set(0, 0.1, 3.65);
@@ -66,12 +83,27 @@
     tableGroup.add(bLong1, bLong2, bShort1, bShort2);
     scene.add(tableGroup);
 
-    // 4. Кулі
-    const balls = [];
+    // 4. Лузи
+    const pockets = [
+        { x: -6.8, z: -3.3 }, { x: 0, z: -3.45 }, { x: 6.8, z: -3.3 },
+        { x: -6.8, z: 3.3 },  { x: 0, z: 3.45 },  { x: 6.8, z: 3.3 }
+    ];
+    const pocketRadius = 0.42;
+    const pocketGeo = new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.1, 24);
+    const pocketMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+    pockets.forEach(p => {
+        const pMesh = new THREE.Mesh(pocketGeo, pocketMat);
+        pMesh.position.set(p.x, 0.02, p.z);
+        scene.add(pMesh);
+    });
+
+    // 5. Кулі
+    let balls = [];
     const ballRadius = 0.22;
     const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
 
-    function createBall(x, z, color, isCue = false) {
+    function createBall(x, z, color, pointsValue, isCue = false) {
         const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.1, metalness: 0.1 });
         const mesh = new THREE.Mesh(ballGeo, mat);
         mesh.position.set(x, ballRadius, z);
@@ -82,43 +114,72 @@
             mesh: mesh,
             vel: { x: 0, z: 0 },
             isCue: isCue,
-            radius: ballRadius
+            radius: ballRadius,
+            isFalling: false,
+            points: pointsValue
         });
-        return mesh;
     }
 
-    // Біла куля (Cue ball)
-    const cueBall = createBall(-4, 0, 0xffffff, true);
+    function initGameObjects() {
+        // Очищення старих куль якщо є
+        balls.forEach(b => scene.remove(b.mesh));
+        balls = [];
 
-    // Прицільні кулі (піраміда)
-    const startX = 2;
-    let ballIndex = 0;
-    const colors = [0xffd700, 0x0000ff, 0xff0000, 0x4b0082, 0xff8c00, 0x008000, 0x800000, 0x000000, 0xffd700];
-    
-    for (let i = 0; i < 4; i++) {
-        for (let j = 0; j <= i; j++) {
-            const bx = startX + i * (ballRadius * 1.73);
-            const bz = (j - i / 2) * (ballRadius * 2.1);
-            createBall(bx, bz, colors[ballIndex % colors.length]);
-            ballIndex++;
+        // Біла куля
+        createBall(-4, 0, 0xffffff, -2, true);
+
+        // Створення піраміди куль з різною цінністю
+        const startX = 1.5;
+        // Набір кольорів та їхня вартість: чорна (+7), червона (+3), жовта/синя (+1)
+        const ballSetup = [
+            { c: 0xffd700, p: 1 },  // Рядок 1
+            { c: 0x0000ff, p: 1 }, { c: 0xff0000, p: 3 }, // Рядок 2
+            { c: 0xff0000, p: 3 }, { c: 0x111111, p: 7 }, { c: 0xff0000, p: 3 }, // Рядок 3 (Чорна по центру)
+            { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, // Рядок 4
+            { c: 0xff0000, p: 3 }, { c: 0xff0000, p: 3 }, { c: 0xffd700, p: 1 }, { c: 0x0000ff, p: 1 }, { c: 0xff0000, p: 3 } // Рядок 5
+        ];
+
+        let idx = 0;
+        for (let i = 0; i < 5; i++) {
+            for (let j = 0; j <= i; j++) {
+                const bx = startX + i * (ballRadius * 1.8);
+                const bz = (j - i / 2) * (ballRadius * 2.15);
+                const setup = ballSetup[idx] || { c: 0xffffff, p: 1 };
+                createBall(bx, bz, setup.c, setup.p);
+                idx++;
+            }
         }
+
+        score = 0;
+        clicksLeft = 15;
+        gameOver = false;
+        document.getElementById('score').innerText = score;
+        document.getElementById('clicks').innerText = clicksLeft;
+        document.getElementById('game-over').style.display = 'none';
     }
 
-    // Кювет/Лінія прицілювання
+    initGameObjects();
+
+    // Лінія прицілювання
     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xff3333, linewidth: 2 });
     const aimLine = new THREE.Line(lineGeo, lineMat);
     aimLine.visible = false;
     scene.add(aimLine);
 
-    // 5. Керування тачем (дотиком)
+    // 6. Керування
     let isDragging = false;
     let touchStart = { x: 0, y: 0 };
     let aimVector = { x: 0, z: 0 };
 
     window.addEventListener('touchstart', (e) => {
-        // Дозволяємо удар тільки якщо біла куля стоїть
-        if (Math.abs(balls[0].vel.x) < 0.01 && Math.abs(balls[0].vel.z) < 0.01) {
+        if (gameOver) {
+            initGameObjects();
+            return;
+        }
+
+        const whiteBall = balls.find(b => b.isCue);
+        if (whiteBall && Math.abs(whiteBall.vel.x) < 0.01 && Math.abs(whiteBall.vel.z) < 0.01 && !whiteBall.isFalling) {
             isDragging = true;
             touchStart.x = e.touches[0].clientX;
             touchStart.y = e.touches[0].clientY;
@@ -126,40 +187,75 @@
     });
 
     window.addEventListener('touchmove', (e) => {
-        if (!isDragging) return;
+        if (!isDragging || gameOver) return;
         
         const dx = e.touches[0].clientX - touchStart.x;
         const dy = e.touches[0].clientY - touchStart.y;
         
-        // Розрахунок сили та напрямку
-        aimVector.x = -dx * 0.05;
-        aimVector.z = -dy * 0.05;
+        aimVector.x = -dx * 0.04;
+        aimVector.z = -dy * 0.04;
 
-        // Оновлення лінії прицілювання
-        aimLine.visible = true;
-        const p = balls[0].mesh.position;
-        const points = [
-            new THREE.Vector3(p.x, p.y, p.z),
-            new THREE.Vector3(p.x + aimVector.x * 3, p.y, p.z + aimVector.z * 3)
-        ];
-        aimLine.geometry.setFromPoints(points);
+        const whiteBall = balls.find(b => b.isCue);
+        if (whiteBall) {
+            aimLine.visible = true;
+            const p = whiteBall.mesh.position;
+            const points = [
+                new THREE.Vector3(p.x, p.y, p.z),
+                new THREE.Vector3(p.x + aimVector.x * 3, p.y, p.z + aimVector.z * 3)
+            ];
+            aimLine.geometry.setFromPoints(points);
+        }
     });
 
     window.addEventListener('touchend', () => {
-        if (!isDragging) return;
+        if (!isDragging || gameOver) return;
         isDragging = false;
         aimLine.visible = false;
 
-        // Штовхаємо білу кулю
-        balls[0].vel.x = aimVector.x * 0.2;
-        balls[0].vel.z = aimVector.z * 0.2;
+        const whiteBall = balls.find(b => b.isCue);
+        if (whiteBall) {
+            // Рахуємо удар лише якщо лінія прицілювання мала силу
+            if (Math.abs(aimVector.x) > 0.1 || Math.abs(aimVector.z) > 0.1) {
+                whiteBall.vel.x = aimVector.x * 0.26;
+                whiteBall.vel.z = aimVector.z * 0.26;
+                clicksLeft--;
+                document.getElementById('clicks').innerText = clicksLeft;
+            }
+        }
     });
 
-    // 6. Фізичний рух та зіткнення
+    // 7. Фізика
     function updatePhysics() {
-        const friction = 0.985; // Тертя столу
+        const friction = 0.984;
 
-        balls.forEach(b => {
+        for (let i = balls.length - 1; i >= 0; i--) {
+            const b = balls[i];
+
+            if (b.isFalling) {
+                b.mesh.position.y -= 0.04;
+                b.mesh.scale.multiplyScalar(0.88);
+                
+                if (b.mesh.position.y < -0.8) {
+                    if (b.isCue) {
+                        // Штраф за білу кулю
+                        score += b.points; // Додає мінус 2
+                        document.getElementById('score').innerText = score;
+                        
+                        b.mesh.position.set(-4, ballRadius, 0);
+                        b.mesh.scale.set(1, 1, 1);
+                        b.vel.x = 0; b.vel.z = 0;
+                        b.isFalling = false;
+                    } else {
+                        // Плюс за кольорову кулю
+                        score += b.points;
+                        document.getElementById('score').innerText = score;
+                        scene.remove(b.mesh);
+                        balls.splice(i, 1);
+                    }
+                }
+                continue;
+            }
+
             b.mesh.position.x += b.vel.x;
             b.mesh.position.z += b.vel.z;
 
@@ -169,7 +265,16 @@
             if (Math.abs(b.vel.x) < 0.001) b.vel.x = 0;
             if (Math.abs(b.vel.z) < 0.001) b.vel.z = 0;
 
-            // Зіткнення з бортиками
+            // Перевірка луз
+            pockets.forEach(p => {
+                const pdx = b.mesh.position.x - p.x;
+                const pdz = b.mesh.position.z - p.z;
+                if (Math.sqrt(pdx * pdx + pdz * pdz) < pocketRadius) {
+                    b.isFalling = true;
+                }
+            });
+
+            // Бортики
             const limitX = 7.0 - b.radius;
             const limitZ = 3.5 - b.radius;
 
@@ -177,13 +282,23 @@
             if (b.mesh.position.x < -limitX) { b.mesh.position.x = -limitX; b.vel.x *= -1; }
             if (b.mesh.position.z > limitZ) { b.mesh.position.z = limitZ; b.vel.z *= -1; }
             if (b.mesh.position.z < -limitZ) { b.mesh.position.z = -limitZ; b.vel.z *= -1; }
-        });
+        }
 
-        // Зіткнення куль між собою
+        // Перевірка кінця гри (коли всі кулі зупинилися і ходи закінчились)
+        if (clicksLeft <= 0 && !gameOver) {
+            let allStopped = balls.every(b => b.vel.x === 0 && b.vel.z === 0);
+            if (allStopped) {
+                gameOver = true;
+                document.getElementById('final-score').innerText = score;
+                document.getElementById('game-over').style.display = 'block';
+            }
+        }
+
+        // Зіткнення куль
         for (let i = 0; i < balls.length; i++) {
             for (let j = i + 1; j < balls.length; j++) {
-                const b1 = balls[i];
-                const b2 = balls[j];
+                const b1 = balls[i]; const b2 = balls[j];
+                if (b1.isFalling || b2.isFalling) continue;
 
                 const dx = b2.mesh.position.x - b1.mesh.position.x;
                 const dz = b2.mesh.position.z - b1.mesh.position.z;
@@ -191,34 +306,27 @@
                 const minDist = b1.radius + b2.radius;
 
                 if (dist < minDist) {
-                    // Просте пружне зіткнення
-                    const nx = dx / dist;
-                    const nz = dz / dist;
-
-                    // Розштовхуємо кулі, щоб не застрягали
+                    const nx = dx / dist; const nz = dz / dist;
                     const overlap = minDist - dist;
                     b1.mesh.position.x -= nx * overlap * 0.5;
                     b1.mesh.position.z -= nz * overlap * 0.5;
                     b2.mesh.position.x += nx * overlap * 0.5;
                     b2.mesh.position.z += nz * overlap * 0.5;
 
-                    // Обмін швидкостями
                     const kx = b1.vel.x - b2.vel.x;
                     const kz = b1.vel.z - b2.vel.z;
                     const p = nx * kx + nz * kz;
 
                     if (p > 0) {
-                        b1.vel.x -= nx * p;
-                        b1.vel.z -= nz * p;
-                        b2.vel.x += nx * p;
-                        b2.vel.z += nz * p;
+                        b1.vel.x -= nx * p; b1.vel.z -= nz * p;
+                        b2.vel.x += nx * p; b2.vel.z += nz * p;
                     }
                 }
             }
         }
     }
 
-    // 7. Ігровий цикл анімації
+    // 8. Анімація
     function animate() {
         requestAnimationFrame(animate);
         updatePhysics();
@@ -227,7 +335,6 @@
 
     animate();
 
-    // Адаптація екрану
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
