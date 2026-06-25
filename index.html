@@ -86,10 +86,10 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
 
-    const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
-    // Відсунули камеру трохи назад (z: 2.2) і підняли вище (y: 15.5) для кращого огляду верху столу
-    camera.position.set(0, 15.5, 2.2);
-    camera.lookAt(0, -0.5, -0.8);
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    // Налаштували огляд так, щоб стіл було видно повністю без спотворень
+    camera.position.set(0, 16, 3.5);
+    camera.lookAt(0, -0.5, -1);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -97,15 +97,15 @@
     document.body.appendChild(renderer.domElement);
 
     // 2. Світло
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.65);
-    dirLight.position.set(3, 18, 3);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(3, 15, 3);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 3. Зменшений вертикальний стіл (ширина 5.6, довжина 11.2)
+    // 3. ПРАВИЛЬНИЙ СТІЛ (Ширина 5.6, Довжина 11.2)
     const tableGroup = new THREE.Group();
     const clothGeo = new THREE.BoxGeometry(5.6, 0.4, 11.2);
     const clothMat = new THREE.MeshStandardMaterial({ color: 0x0a6c36, roughness: 0.7 });
@@ -115,24 +115,27 @@
     tableGroup.add(cloth);
 
     const borderMat = new THREE.MeshStandardMaterial({ color: 0x5a2a00, roughness: 0.5 });
-    const bShort1 = new THREE.Mesh(new THREE.BoxGeometry(6.1, 0.6, 0.25), borderMat);
-    bShort1.position.set(0, 0.1, 5.725);
-    const bShort2 = bShort1.clone(); bShort2.position.z = -5.725;
     
-    const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.6, 11.7), borderMat);
-    bLong1.position.set(2.925, 0.1, 0);
-    const bLong2 = bLong1.clone(); bLong2.position.x = -2.925;
+    // Короткі бортики (вгорі та внизу) - ширина має чітко перекривати стіл (5.6 + товщина)
+    const bShort1 = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.6, 0.3), borderMat);
+    bShort1.position.set(0, 0.1, 5.75);
+    const bShort2 = bShort1.clone(); bShort2.position.z = -5.75;
+    
+    // Довгі бортики (зліва та справа) - довжина 11.2
+    const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 11.2), borderMat);
+    bLong1.position.set(2.95, 0.1, 0);
+    const bLong2 = bLong1.clone(); bLong2.position.x = -2.95;
 
     tableGroup.add(bShort1, bShort2, bLong1, bLong2);
     scene.add(tableGroup);
 
-    // 4. Оптимізовані під нові розміри лузи
+    // 4. Лузи на своїх правильних місцях
     const pockets = [
-        { x: -2.65, z: -5.4 }, { x: 2.65, z: -5.4 }, // Верхні кутові
-        { x: -2.75, z: 0 },    { x: 2.75, z: 0 },    // Середні
-        { x: -2.65, z: 5.4 },  { x: 2.65, z: 5.4 }   // Нижні кутові
+        { x: -2.55, z: -5.35 }, { x: 2.55, z: -5.35 }, // Верхні кутові
+        { x: -2.7, z: 0 },      { x: 2.7, z: 0 },       // Середні
+        { x: -2.55, z: 5.35 },  { x: 2.55, z: 5.35 }    // Нижні кутові
     ];
-    const pocketRadius = 0.35;
+    const pocketRadius = 0.34;
     const pocketGeo = new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.1, 24);
     const pocketMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
 
@@ -142,9 +145,9 @@
         scene.add(pMesh);
     });
 
-    // 5. Кулі (розмір також зменшено пропорційно столу)
+    // 5. Кулі (Радіус 0.16 — ідеально для цього столу)
     let balls = [];
-    const ballRadius = 0.17;
+    const ballRadius = 0.16;
     const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
 
     function createBall(x, z, color, pointsValue, isCue = false) {
@@ -168,10 +171,10 @@
         balls.forEach(b => scene.remove(b.mesh));
         balls = [];
 
-        // Біла куля зручно розташована знизу
+        // Біла куля знизу
         createBall(0, 3.2, 0xffffff, -2, true);
 
-        // Піраміда вгорі столу
+        // Піраміда вгорі
         const startZ = -1.2;
         const ballSetup = [
             { c: 0xffd700, p: 1 },
@@ -259,9 +262,8 @@
         const whiteBall = balls.find(b => b.isCue);
         if (whiteBall) {
             if (Math.abs(aimVector.x) > 0.04 || Math.abs(aimVector.z) > 0.04) {
-                // Швидкість підлаштована під нові розміри
-                whiteBall.vel.x = aimVector.x * 0.24;
-                whiteBall.vel.z = aimVector.z * 0.24;
+                whiteBall.vel.x = aimVector.x * 0.23;
+                whiteBall.vel.z = aimVector.z * 0.23;
                 clicksLeft--;
                 document.getElementById('clicks').innerText = clicksLeft;
                 playHitSound(1.1);
@@ -318,7 +320,7 @@
                 }
             });
 
-            // Нові точні межі бортиків
+            // МЕЖІ БОРТИКІВ (Тепер чітко узгоджені з розмірами столу 5.6 на 11.2)
             const limitX = 2.8 - b.radius;
             const limitZ = 5.6 - b.radius;
             let hitBorder = false;
@@ -391,4 +393,10 @@
     animate();
 
     window.addEventListener('resize', () => {
-        camera
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
