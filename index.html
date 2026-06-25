@@ -5,71 +5,229 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>3D Більярд</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; }
+        body { margin: 0; overflow: hidden; background-color: #111; touch-action: none; font-family: sans-serif; }
         canvas { display: block; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 5px;
+            font-size: 14px; pointer-events: none;
+        }
     </style>
-    <!-- Підключаємо Three.js для 3D графіки прямо з інтернету -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
+<div id="ui">Проведіть пальцем, щоб націлитись. Відпустіть для удару!</div>
+
 <script>
     // 1. Сцена, Камера, Рендерер
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = new THREE.Color(0x151515);
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 10, 15);
-    camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 12, 10);
+    camera.lookAt(0, -1, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // 2. Освітлення
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // 2. Світло
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(5, 20, 10);
+    dirLight.position.set(5, 20, 5);
+    dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 3. Більярдний стіл (зелена площина)
-    const tableGeometry = new THREE.BoxGeometry(16, 0.5, 8);
-    const tableMaterial = new THREE.MeshStandardMaterial({ color: 0x006622, roughness: 0.6 });
-    const table = new THREE.Mesh(tableGeometry, tableMaterial);
-    table.position.y = -0.25;
-    scene.add(table);
+    // 3. Стіл (ігрове поле та бортики)
+    const tableGroup = new THREE.Group();
+    
+    // Зелене сукно
+    const clothGeo = new THREE.BoxGeometry(14, 0.4, 7);
+    const clothMat = new THREE.MeshStandardMaterial({ color: 0x0a6c36, roughness: 0.7 });
+    const cloth = new THREE.Mesh(clothGeo, clothMat);
+    cloth.position.y = -0.2;
+    cloth.receiveShadow = true;
+    tableGroup.add(cloth);
 
-    // 4. Біла куля (Cue Ball)
-    const ballGeometry = new THREE.SphereGeometry(0.3, 32, 32);
-    const ballMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1 });
-    const ball = new THREE.Mesh(ballGeometry, ballMaterial);
-    ball.position.set(-4, 0.3, 0); // Ставимо на стіл
-    scene.add(ball);
+    // Дерев'яні бортики
+    const borderMat = new THREE.MeshStandardMaterial({ color: 0x5a2a00, roughness: 0.5 });
+    const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(14.6, 0.6, 0.3), borderMat);
+    bLong1.position.set(0, 0.1, 3.65);
+    const bLong2 = bLong1.clone(); bLong2.position.z = -3.65;
+    
+    const bShort1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 7.6), borderMat);
+    bShort1.position.set(7.15, 0.1, 0);
+    const bShort2 = bShort1.clone(); bShort2.position.x = -7.15;
 
-    // Швидкість кулі (для майбутнього руху)
-    let ballVelocity = { x: 0.05, z: 0.02 };
+    tableGroup.add(bLong1, bLong2, bShort1, bShort2);
+    scene.add(tableGroup);
 
-    // 5. Анімація (Ігровий цикл)
+    // 4. Кулі
+    const balls = [];
+    const ballRadius = 0.22;
+    const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
+
+    function createBall(x, z, color, isCue = false) {
+        const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.1, metalness: 0.1 });
+        const mesh = new THREE.Mesh(ballGeo, mat);
+        mesh.position.set(x, ballRadius, z);
+        mesh.castShadow = true;
+        scene.add(mesh);
+        
+        balls.push({
+            mesh: mesh,
+            vel: { x: 0, z: 0 },
+            isCue: isCue,
+            radius: ballRadius
+        });
+        return mesh;
+    }
+
+    // Біла куля (Cue ball)
+    const cueBall = createBall(-4, 0, 0xffffff, true);
+
+    // Прицільні кулі (піраміда)
+    const startX = 2;
+    let ballIndex = 0;
+    const colors = [0xffd700, 0x0000ff, 0xff0000, 0x4b0082, 0xff8c00, 0x008000, 0x800000, 0x000000, 0xffd700];
+    
+    for (let i = 0; i < 4; i++) {
+        for (let j = 0; j <= i; j++) {
+            const bx = startX + i * (ballRadius * 1.73);
+            const bz = (j - i / 2) * (ballRadius * 2.1);
+            createBall(bx, bz, colors[ballIndex % colors.length]);
+            ballIndex++;
+        }
+    }
+
+    // Кювет/Лінія прицілювання
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
+    const aimLine = new THREE.Line(lineGeo, lineMat);
+    aimLine.visible = false;
+    scene.add(aimLine);
+
+    // 5. Керування тачем (дотиком)
+    let isDragging = false;
+    let touchStart = { x: 0, y: 0 };
+    let aimVector = { x: 0, z: 0 };
+
+    window.addEventListener('touchstart', (e) => {
+        // Дозволяємо удар тільки якщо біла куля стоїть
+        if (Math.abs(balls[0].vel.x) < 0.01 && Math.abs(balls[0].vel.z) < 0.01) {
+            isDragging = true;
+            touchStart.x = e.touches[0].clientX;
+            touchStart.y = e.touches[0].clientY;
+        }
+    });
+
+    window.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        
+        const dx = e.touches[0].clientX - touchStart.x;
+        const dy = e.touches[0].clientY - touchStart.y;
+        
+        // Розрахунок сили та напрямку
+        aimVector.x = -dx * 0.05;
+        aimVector.z = -dy * 0.05;
+
+        // Оновлення лінії прицілювання
+        aimLine.visible = true;
+        const p = balls[0].mesh.position;
+        const points = [
+            new THREE.Vector3(p.x, p.y, p.z),
+            new THREE.Vector3(p.x + aimVector.x * 3, p.y, p.z + aimVector.z * 3)
+        ];
+        aimLine.geometry.setFromPoints(points);
+    });
+
+    window.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        aimLine.visible = false;
+
+        // Штовхаємо білу кулю
+        balls[0].vel.x = aimVector.x * 0.2;
+        balls[0].vel.z = aimVector.z * 0.2;
+    });
+
+    // 6. Фізичний рух та зіткнення
+    function updatePhysics() {
+        const friction = 0.985; // Тертя столу
+
+        balls.forEach(b => {
+            b.mesh.position.x += b.vel.x;
+            b.mesh.position.z += b.vel.z;
+
+            b.vel.x *= friction;
+            b.vel.z *= friction;
+
+            if (Math.abs(b.vel.x) < 0.001) b.vel.x = 0;
+            if (Math.abs(b.vel.z) < 0.001) b.vel.z = 0;
+
+            // Зіткнення з бортиками
+            const limitX = 7.0 - b.radius;
+            const limitZ = 3.5 - b.radius;
+
+            if (b.mesh.position.x > limitX) { b.mesh.position.x = limitX; b.vel.x *= -1; }
+            if (b.mesh.position.x < -limitX) { b.mesh.position.x = -limitX; b.vel.x *= -1; }
+            if (b.mesh.position.z > limitZ) { b.mesh.position.z = limitZ; b.vel.z *= -1; }
+            if (b.mesh.position.z < -limitZ) { b.mesh.position.z = -limitZ; b.vel.z *= -1; }
+        });
+
+        // Зіткнення куль між собою
+        for (let i = 0; i < balls.length; i++) {
+            for (let j = i + 1; j < balls.length; j++) {
+                const b1 = balls[i];
+                const b2 = balls[j];
+
+                const dx = b2.mesh.position.x - b1.mesh.position.x;
+                const dz = b2.mesh.position.z - b1.mesh.position.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+                const minDist = b1.radius + b2.radius;
+
+                if (dist < minDist) {
+                    // Просте пружне зіткнення
+                    const nx = dx / dist;
+                    const nz = dz / dist;
+
+                    // Розштовхуємо кулі, щоб не застрягали
+                    const overlap = minDist - dist;
+                    b1.mesh.position.x -= nx * overlap * 0.5;
+                    b1.mesh.position.z -= nz * overlap * 0.5;
+                    b2.mesh.position.x += nx * overlap * 0.5;
+                    b2.mesh.position.z += nz * overlap * 0.5;
+
+                    // Обмін швидкостями
+                    const kx = b1.vel.x - b2.vel.x;
+                    const kz = b1.vel.z - b2.vel.z;
+                    const p = nx * kx + nz * kz;
+
+                    if (p > 0) {
+                        b1.vel.x -= nx * p;
+                        b1.vel.z -= nz * p;
+                        b2.vel.x += nx * p;
+                        b2.vel.z += nz * p;
+                    }
+                }
+            }
+        }
+    }
+
+    // 7. Ігровий цикл анімації
     function animate() {
         requestAnimationFrame(animate);
-
-        // Простий рух кулі
-        ball.position.x += ballVelocity.x;
-        ball.position.z += ballVelocity.z;
-
-        // Відбивання від бортиків столу
-        if (ball.position.x > 7.7 || ball.position.x < -7.7) ballVelocity.x *= -1;
-        if (ball.position.z > 3.7 || ball.position.z < -3.7) ballVelocity.z *= -1;
-
+        updatePhysics();
         renderer.render(scene, camera);
     }
 
-    // Запуск анімації
     animate();
 
-    // Адаптація під розмір екрану мобільного при повороті
+    // Адаптація екрану
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
