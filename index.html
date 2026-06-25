@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Більярд Про</title>
+    <title>3D Більярд Про + Монети UA</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; touch-action: none; font-family: sans-serif; }
         canvas { display: block; }
@@ -17,14 +17,16 @@
             display: none; position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%); color: white; background: rgba(0,0,0,0.9);
             padding: 30px; border-radius: 10px; text-align: center; font-size: 24px;
-            z-index: 10;
+            z-index: 10; width: 80%; max-width: 300px;
         }
+        .ua-coin { color: #ffd700; font-weight: bold; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
 <div id="ui">
+    <b>Баланс:</b> <span id="balance" class="ua-coin">0 UA</span><br>
     <b>Очки:</b> <span id="score" style="color: #ff3333;">0</span> | 
     <b>Ударів:</b> <span id="clicks" style="color: #00ff55;">15</span><br>
     <small style="opacity: 0.8;">Чорна: +7 | Червона: +3 | Інші: +1 (Біла: -2)</small>
@@ -33,20 +35,60 @@
 <div id="game-over">
     <h2>ГРУ ЗАКІНЧЕНО!</h2>
     <p>Ваш результат: <span id="final-score">0</span> очок</p>
-    <p style="font-size: 16px; color: #aaa;">Торкніться екрана для перезапуску</p>
+    <p style="font-size: 18px; color: #ffd700;">Зароблено: +<span id="earned-ua">0</span> UA</p>
+    <p style="font-size: 15px; color: #aaa; margin-top: 20px;">Торкніться екрана для нової гри</p>
 </div>
 
 <script>
     let score = 0;
     let clicksLeft = 15;
     let gameOver = false;
+    
+    // Завантажуємо баланс монет UA з пам'яті телефону (якщо грають вперше, то 0)
+    let uaBalance = parseInt(localStorage.getItem('ua_billiards_balance')) || 0;
 
-    // 1. Сцена, Камера, Рендерер (налаштовано під вертикальний екран)
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+
+    function initAudio() {
+        if (!audioCtx) audioCtx = new AudioContext();
+    }
+
+    function playHitSound(volume = 1) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(120, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(volume * 0.5, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.08);
+    }
+
+    function playPocketSound() {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.3);
+        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+    }
+
+    // 1. Сцена, Камера, Рендерер
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 15, 1); // Камера дивиться згори по центру
+    camera.position.set(0, 15, 1);
     camera.lookAt(0, -1, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -63,9 +105,9 @@
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 3. Вертикальний стіл (координати X та Z помінялися місцями)
+    // 3. Вертикальний стіл
     const tableGroup = new THREE.Group();
-    const clothGeo = new THREE.BoxGeometry(7, 0.4, 14); // Ширина 7, Довжина 14
+    const clothGeo = new THREE.BoxGeometry(7, 0.4, 14);
     const clothMat = new THREE.MeshStandardMaterial({ color: 0x0a6c36, roughness: 0.7 });
     const cloth = new THREE.Mesh(clothGeo, clothMat);
     cloth.position.y = -0.2;
@@ -73,12 +115,10 @@
     tableGroup.add(cloth);
 
     const borderMat = new THREE.MeshStandardMaterial({ color: 0x5a2a00, roughness: 0.5 });
-    // Короткі бортики (вгорі та внизу)
     const bShort1 = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.6, 0.3), borderMat);
     bShort1.position.set(0, 0.1, 7.15);
     const bShort2 = bShort1.clone(); bShort2.position.z = -7.15;
     
-    // Довгі бортики (зліва та справа)
     const bLong1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 14.6), borderMat);
     bLong1.position.set(3.65, 0.1, 0);
     const bLong2 = bLong1.clone(); bLong2.position.x = -3.65;
@@ -86,11 +126,11 @@
     tableGroup.add(bShort1, bShort2, bLong1, bLong2);
     scene.add(tableGroup);
 
-    // 4. Вертикальні лузи
+    // 4. Лузи
     const pockets = [
-        { x: -3.3, z: -6.8 }, { x: 3.3, z: -6.8 }, // Верхні кутові
-        { x: -3.45, z: 0 },   { x: 3.45, z: 0 },   // Середні
-        { x: -3.3, z: 6.8 },  { x: 3.3, z: 6.8 }   // Нижні кутові
+        { x: -3.3, z: -6.8 }, { x: 3.3, z: -6.8 },
+        { x: -3.45, z: 0 },   { x: 3.45, z: 0 },
+        { x: -3.3, z: 6.8 },  { x: 3.3, z: 6.8 }
     ];
     const pocketRadius = 0.42;
     const pocketGeo = new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.1, 24);
@@ -128,10 +168,8 @@
         balls.forEach(b => scene.remove(b.mesh));
         balls = [];
 
-        // Біла куля (тепер внизу столу для зручного удару вгору)
         createBall(0, 4, 0xffffff, -2, true);
 
-        // Піраміда кольорових куль (тепер вгорі столу)
         const startZ = -1.5;
         const ballSetup = [
             { c: 0xffd700, p: 1 },
@@ -144,7 +182,6 @@
         let idx = 0;
         for (let i = 0; i < 5; i++) {
             for (let j = 0; j <= i; j++) {
-                // Розвертаємо побудову піраміди по вертикалі
                 const bx = (j - i / 2) * (ballRadius * 2.15);
                 const bz = startZ - i * (ballRadius * 1.8);
                 const setup = ballSetup[idx] || { c: 0xffffff, p: 1 };
@@ -158,12 +195,13 @@
         gameOver = false;
         document.getElementById('score').innerText = score;
         document.getElementById('clicks').innerText = clicksLeft;
+        document.getElementById('balance').innerText = uaBalance + " UA";
         document.getElementById('game-over').style.display = 'none';
     }
 
+    // Перший запуск
     initGameObjects();
 
-    // Лінія прицілювання
     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
     const lineMat = new THREE.LineBasicMaterial({ color: 0xff3333 });
     const aimLine = new THREE.Line(lineGeo, lineMat);
@@ -176,6 +214,8 @@
     let aimVector = { x: 0, z: 0 };
 
     window.addEventListener('touchstart', (e) => {
+        initAudio();
+        
         if (gameOver) {
             initGameObjects();
             return;
@@ -195,7 +235,6 @@
         const dx = e.touches[0].clientX - touchStart.x;
         const dy = e.touches[0].clientY - touchStart.y;
         
-        // Коригуємо напрямок відтягування під нову орієнтацію
         aimVector.x = -dx * 0.04;
         aimVector.z = -dy * 0.04;
 
@@ -223,6 +262,7 @@
                 whiteBall.vel.z = aimVector.z * 0.26;
                 clicksLeft--;
                 document.getElementById('clicks').innerText = clicksLeft;
+                playHitSound(1.2);
             }
         }
     });
@@ -239,11 +279,12 @@
                 b.mesh.scale.multiplyScalar(0.88);
                 
                 if (b.mesh.position.y < -0.8) {
+                    playPocketSound();
+                    
                     if (b.isCue) {
                         score += b.points;
                         document.getElementById('score').innerText = score;
                         
-                        // Повертаємо білу кулю на її нове початкове місце (вниз столу)
                         b.mesh.position.set(0, ballRadius, 4);
                         b.mesh.scale.set(1, 1, 1);
                         b.vel.x = 0; b.vel.z = 0;
@@ -267,7 +308,6 @@
             if (Math.abs(b.vel.x) < 0.001) b.vel.x = 0;
             if (Math.abs(b.vel.z) < 0.001) b.vel.z = 0;
 
-            // Перевірка луз
             pockets.forEach(p => {
                 const pdx = b.mesh.position.x - p.x;
                 const pdz = b.mesh.position.z - p.z;
@@ -276,27 +316,40 @@
                 }
             });
 
-            // Нові межі бортиків для вертикального столу
             const limitX = 3.5 - b.radius;
             const limitZ = 7.0 - b.radius;
+            let hitBorder = false;
 
-            if (b.mesh.position.x > limitX) { b.mesh.position.x = limitX; b.vel.x *= -1; }
-            if (b.mesh.position.x < -limitX) { b.mesh.position.x = -limitX; b.vel.x *= -1; }
-            if (b.mesh.position.z > limitZ) { b.mesh.position.z = limitZ; b.vel.z *= -1; }
-            if (b.mesh.position.z < -limitZ) { b.mesh.position.z = -limitZ; b.vel.z *= -1; }
+            if (b.mesh.position.x > limitX) { b.mesh.position.x = limitX; b.vel.x *= -1; hitBorder = true; }
+            if (b.mesh.position.x < -limitX) { b.mesh.position.x = -limitX; b.vel.x *= -1; hitBorder = true; }
+            if (b.mesh.position.z > limitZ) { b.mesh.position.z = limitZ; b.vel.z *= -1; hitBorder = true; }
+            if (b.mesh.position.z < -limitZ) { b.mesh.position.z = -limitZ; b.vel.z *= -1; hitBorder = true; }
+            
+            if (hitBorder && (Math.abs(b.vel.x) > 0.05 || Math.abs(b.vel.z) > 0.05)) {
+                playHitSound(0.4);
+            }
         }
 
-        // Перевірка фінішу
+        // КОЛИ ЗАКІНЧУЮТЬСЯ ХОДИ ТА КУЛІ ЗУПИНЯЮТЬСЯ:
         if (clicksLeft <= 0 && !gameOver) {
             let allStopped = balls.every(b => b.vel.x === 0 && b.vel.z === 0);
             if (allStopped) {
                 gameOver = true;
+                
+                // Нарахування монет UA зароблені очки (лише якщо очки додатні)
+                let uaEarned = score > 0 ? score : 0;
+                uaBalance += uaEarned;
+                
+                // Зберігаємо новий баланс монет UA в браузері
+                localStorage.setItem('ua_billiards_balance', uaBalance);
+                
+                // Відображаємо вікно завершення гри
                 document.getElementById('final-score').innerText = score;
+                document.getElementById('earned-ua').innerText = uaEarned;
                 document.getElementById('game-over').style.display = 'block';
             }
         }
 
-        // Зіткнення
         for (let i = 0; i < balls.length; i++) {
             for (let j = i + 1; j < balls.length; j++) {
                 const b1 = balls[i]; const b2 = balls[j];
@@ -322,6 +375,9 @@
                     if (p > 0) {
                         b1.vel.x -= nx * p; b1.vel.z -= nz * p;
                         b2.vel.x += nx * p; b2.vel.z += nz * p;
+                        
+                        const speed = Math.sqrt(kx * kx + kz * kz);
+                        if (speed > 0.02) playHitSound(Math.min(speed * 3, 1));
                     }
                 }
             }
